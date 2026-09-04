@@ -18,7 +18,7 @@
 
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; background: #0b0f17; color: #f8fafc; }
-    #map { height: 44vh; width: 100%; z-index: 1; }
+    #map { height: 42vh; width: 100%; z-index: 1; }
     .bottom-sheet {
       background: #111827;
       border-top: 1px solid rgba(255, 255, 255, 0.1);
@@ -38,12 +38,14 @@
   </style>
 
   <script>
-    const PAPA_PHONE = "7665219980";
-    const PAPA_WHATSAPP = "917665219980";
+    const OWNER_NAME = "Nand Lal Kumawat";
+    const OWNER_PHONE = "9413159195";
+    const OWNER_WHATSAPP = "919413159195";
 
     let map, pickupMarker, dropMarker, routeLayer;
     let pickupCoords = null;
     let dropCoords = null;
+    let customerLiveGps = null;
     let distanceKm = 0;
 
     function initMap() {
@@ -61,14 +63,16 @@
       });
     }
 
+    // Customer Live GPS Location Fetch
     window.useCurrentLocation = () => {
-      if (!navigator.geolocation) return alert("Location permission not available.");
+      if (!navigator.geolocation) return alert("Aapke phone me location support nahi hai.");
       navigator.geolocation.getCurrentPosition((pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        setLocation('pickup', [lat, lng], "My Current Location");
-        map.setView([lat, lng], 13);
-      }, () => alert("Location permission denied. Type your address."));
+        customerLiveGps = { lat, lng };
+        setLocation('pickup', [lat, lng], "Mera Current Live Location (GPS)");
+        map.setView([lat, lng], 14);
+      }, () => alert("Location permission allow kijiye taaki driver ko aapka exact pata mil sake."));
     };
 
     function setLocation(type, coords, name) {
@@ -135,7 +139,7 @@
       }
     }
 
-    // Direct WhatsApp
+    // Direct WhatsApp with Mandatory Customer GPS
     window.sendToWhatsApp = () => {
       const pickup = document.getElementById('input-pickup').value.trim();
       const drop = document.getElementById('input-drop').value.trim();
@@ -143,30 +147,52 @@
       if (!pickup || !drop) return alert("Pehle Pickup aur Drop location set karein!");
 
       const name = document.getElementById('c-name').value.trim() || "Customer";
-      const phone = document.getElementById('c-phone').value.trim() || "N/A";
+      const phone = document.getElementById('c-phone').value.trim();
       const date = document.getElementById('c-date').value.trim() || "Aaj / Urgent";
 
-      const mapLink = pickupCoords ? `https://maps.google.com/?q=${pickupCoords[0]},${pickupCoords[1]}` : "Location on app";
+      if (!phone) return alert("Kripya apna mobile number likhein!");
+
+      // Agar customer ne pehle GPS allow nahi kiya toh abhi maang lo
+      if (!customerLiveGps && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition((pos) => {
+          customerLiveGps = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude
+          };
+          triggerWhatsAppMessage(name, phone, date, pickup, drop);
+        }, () => {
+          // Agar customer mana bhi kar de toh map pin wala link bhej do
+          triggerWhatsAppMessage(name, phone, date, pickup, drop);
+        });
+      } else {
+        triggerWhatsAppMessage(name, phone, date, pickup, drop);
+      }
+    };
+
+    function triggerWhatsAppMessage(name, phone, date, pickup, drop) {
+      const targetCoords = customerLiveGps ? [customerLiveGps.lat, customerLiveGps.lng] : (pickupCoords || [26.8719, 75.35]);
+      const exactGoogleMapLink = `https://maps.google.com/?q=${targetCoords[0]},${targetCoords[1]}`;
 
       const text = `🚖 *ERTIGA 7-SEATER CAB BOOKING ENQUIRY*%0A` +
         `------------------------------------%0A` +
         `👤 *Customer Name:* ${encodeURIComponent(name)}%0A` +
-        `📞 *Contact Number:* ${encodeURIComponent(phone)}%0A` +
-        `📅 *Travel Time / Date:* ${encodeURIComponent(date)}%0A%0A` +
-        `📍 *Pickup Location:* ${encodeURIComponent(pickup)}%0A` +
-        `🏁 *Drop Location:* ${encodeURIComponent(drop)}%0A` +
-        `🛣 *Approx Distance:* ${distanceKm ? distanceKm + ' km' : 'Direct Call'}%0A` +
-        `🚘 *Vehicle:* Ertiga (AC 7-Seater)%0A` +
+        `📞 *Customer Phone:* ${encodeURIComponent(phone)}%0A` +
+        `📅 *Time / Date:* ${encodeURIComponent(date)}%0A%0A` +
+        `📍 *Pickup Address:* ${encodeURIComponent(pickup)}%0A` +
+        `🏁 *Drop Destination:* ${encodeURIComponent(drop)}%0A` +
+        `🛣 *One-Way Distance:* ${distanceKm ? distanceKm + ' km' : 'Direct Call'}%0A` +
+        `🚘 *Vehicle Required:* Maruti Ertiga (AC 7-Seater)%0A` +
         `------------------------------------%0A` +
-        `📍 *Pickup Google Map Link:* ${mapLink}%0A%0A` +
-        `*Bhaiya kiraya kitna hoga aur gaadi kab milegi?*`;
+        `📌 *Customer Exact Live GPS Location:*%0A` +
+        `${exactGoogleMapLink}%0A%0A` +
+        `*Namaste Nand Lal ji, is location par gaadi ki availability aur rate confirm kijiye.*`;
 
-      window.open(`https://wa.me/${PAPA_WHATSAPP}?text=${text}`, '_blank');
-    };
+      window.open(`https://wa.me/${OWNER_WHATSAPP}?text=${text}`, '_blank');
+    }
 
-    // Direct Call
+    // Direct Phone Call
     window.directCall = () => {
-      window.location.href = `tel:${PAPA_PHONE}`;
+      window.location.href = `tel:${OWNER_PHONE}`;
     };
 
     window.onload = initMap;
@@ -182,12 +208,12 @@
           <i class="fa-solid fa-van-shuttle text-base"></i>
         </div>
         <div>
-          <h1 class="text-sm font-black text-white">ERTIGA EXPRESS</h1>
-          <p class="text-[10px] text-amber-400 font-semibold uppercase">7-Seater Luxury Cab • Phulera</p>
+          <h1 class="text-sm font-black text-white">ERTIGA CAB SERVICES</h1>
+          <p class="text-[10px] text-amber-400 font-semibold uppercase">Nand Lal Kumawat • 9413159195</p>
         </div>
       </div>
       <button onclick="directCall()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow">
-        <i class="fa-solid fa-phone text-xs"></i> Call Papa
+        <i class="fa-solid fa-phone text-xs"></i> Call Now
       </button>
     </header>
 
@@ -201,11 +227,11 @@
       <div class="bg-slate-900/90 p-3.5 rounded-2xl border border-slate-800 flex flex-col gap-2.5 relative">
         <div class="relative flex items-center gap-2">
           <i class="fa-solid fa-circle-dot text-amber-400 text-xs ml-1"></i>
-          <input id="input-pickup" type="text" placeholder="Pickup Kahan Se Hai? (e.g. Phulera Station)" 
+          <input id="input-pickup" type="text" placeholder="Pickup Address (e.g. Phulera Station / Ghar)" 
                  oninput="searchAddress(this.value, 'pickup')"
                  class="w-full bg-transparent text-xs text-white font-semibold outline-none placeholder:text-slate-500">
-          <button onclick="useCurrentLocation()" class="text-slate-400 hover:text-amber-400 p-1">
-            <i class="fa-solid fa-crosshairs text-xs"></i>
+          <button onclick="useCurrentLocation()" title="Mera Live Location Use Karo" class="text-amber-400 hover:text-amber-300 p-1 flex items-center gap-1 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/30 text-[10px] font-bold">
+            <i class="fa-solid fa-crosshairs"></i> GPS
           </button>
           <div id="pickup-results" class="autocomplete-box hidden top-9 left-0"></div>
         </div>
@@ -221,10 +247,10 @@
         </div>
       </div>
 
-      <!-- Distance Preview -->
+      <!-- Distance Info -->
       <div class="flex items-center justify-between px-2 text-xs">
         <span class="text-slate-400 flex items-center gap-1.5">
-          <i class="fa-solid fa-route text-amber-400"></i> Route Info:
+          <i class="fa-solid fa-route text-amber-400"></i> Route Distance:
         </span>
         <span id="route-info" class="font-bold text-amber-400 font-mono">Location select karein</span>
       </div>
@@ -237,29 +263,29 @@
           </div>
           <div>
             <h4 class="text-xs font-bold text-white">Maruti Ertiga (AC 7-Seater)</h4>
-            <p class="text-[10px] text-slate-400">Family & Tour Cab • Direct Owner Booking</p>
+            <p class="text-[10px] text-slate-400">Family Cab • Outstation & Tour Specialist</p>
           </div>
         </div>
         <span class="text-[10px] font-bold bg-amber-500 text-black px-2 py-0.5 rounded-md uppercase">7 Seats</span>
       </div>
 
-      <!-- Quick Details -->
+      <!-- Customer Inputs -->
       <div class="grid grid-cols-2 gap-2">
         <input id="c-name" type="text" placeholder="Aapka Naam" class="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white outline-none focus:border-amber-500">
         <input id="c-phone" type="tel" placeholder="Mobile Number" class="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white outline-none focus:border-amber-500">
       </div>
-      <input id="c-date" type="text" placeholder="Kab chalna hai? (e.g. Aaj shaam 5 baje / Kal subah)" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white outline-none focus:border-amber-500">
+      <input id="c-date" type="text" placeholder="Kab chalna hai? (e.g. Aaj shaam 6 baje / Kal subah)" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white outline-none focus:border-amber-500">
 
-      <!-- Actions -->
+      <!-- Action Buttons -->
       <div class="flex flex-col gap-2 pt-1">
         <button onclick="sendToWhatsApp()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 rounded-xl text-xs uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition">
           <i class="fa-brands fa-whatsapp text-lg"></i>
-          <span>Send Route & Book On WhatsApp</span>
+          <span>Send Route & Live GPS to WhatsApp</span>
         </button>
 
         <button onclick="directCall()" class="w-full bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold py-3 rounded-xl text-xs uppercase tracking-wider border border-slate-700 flex items-center justify-center gap-2 transition">
           <i class="fa-solid fa-phone"></i>
-          <span>Call Directly: 7665219980</span>
+          <span>Direct Call: 9413159195</span>
         </button>
       </div>
 
