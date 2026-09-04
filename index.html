@@ -18,7 +18,7 @@
 
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; background: #0b0f17; color: #f8fafc; }
-    #map { height: 42vh; width: 100%; z-index: 1; }
+    #map { height: 44vh; width: 100%; z-index: 1; }
     .bottom-sheet {
       background: #111827;
       border-top: 1px solid rgba(255, 255, 255, 0.1);
@@ -35,61 +35,173 @@
       overflow-y: auto;
       box-shadow: 0 10px 25px rgba(0,0,0,0.5);
     }
+    .user-live-dot {
+      width: 16px;
+      height: 16px;
+      background: #38bdf8;
+      border: 3px solid #ffffff;
+      border-radius: 50%;
+      box-shadow: 0 0 12px #38bdf8;
+      position: relative;
+    }
+    .user-live-dot::after {
+      content: '';
+      position: absolute;
+      top: -7px;
+      left: -7px;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: rgba(56, 189, 248, 0.4);
+      animation: pulse-ring 1.8s infinite;
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.6); opacity: 1; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
   </style>
 
   <script>
-    const OWNER_NAME = "Nand Lal Kumawat";
     const OWNER_PHONE = "9413159195";
     const OWNER_WHATSAPP = "919413159195";
 
-    let map, pickupMarker, dropMarker, routeLayer;
+    let map, pickupMarker, dropMarker, routeLayer, accuracyCircle, userLiveMarker;
     let pickupCoords = null;
     let dropCoords = null;
-    let customerLiveGps = null;
     let distanceKm = 0;
+    let isTrackingGps = false;
 
     function initMap() {
-      // Centered at Phulera
-      map = L.map('map', { zoomControl: false }).setView([26.8719, 75.35], 10);
+      // Default Phulera Coordinates
+      map = L.map('map', { zoomControl: false }).setView([26.8719, 75.35], 11);
 
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19
       }).addTo(map);
 
+      // Start Real-Time GPS Tracking right away
+      startLiveGpsTracking();
+
+      // Map Click: If pickup already set, click sets Drop location. Or drag pin to set pickup.
       map.on('click', (e) => {
         const { lat, lng } = e.latlng;
-        if (!pickupCoords) setLocation('pickup', [lat, lng], "Map Pin Location");
-        else setLocation('drop', [lat, lng], "Map Pin Location");
+        if (!pickupCoords) {
+          setPickupLocation([lat, lng], "Marked Pickup Point");
+        } else {
+          setDropLocation([lat, lng], "Marked Drop Point");
+        }
       });
     }
 
-    // Customer Live GPS Location Fetch
-    window.useCurrentLocation = () => {
-      if (!navigator.geolocation) return alert("Aapke phone me location support nahi hai.");
-      navigator.geolocation.getCurrentPosition((pos) => {
+    // Continuous Real-Time User GPS Tracking (Uber Style)
+    function startLiveGpsTracking() {
+      if (!navigator.geolocation) return;
+
+      navigator.geolocation.watchPosition((pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        customerLiveGps = { lat, lng };
-        setLocation('pickup', [lat, lng], "Mera Current Live Location (GPS)");
-        map.setView([lat, lng], 14);
-      }, () => alert("Location permission allow kijiye taaki driver ko aapka exact pata mil sake."));
-    };
+        const accuracy = pos.coords.accuracy;
 
-    function setLocation(type, coords, name) {
-      if (type === 'pickup') {
-        pickupCoords = coords;
-        document.getElementById('input-pickup').value = name;
-        if (pickupMarker) map.removeLayer(pickupMarker);
-        pickupMarker = L.marker(coords).addTo(map).bindPopup("Pickup: " + name);
+        const liveIcon = L.divIcon({
+          html: '<div class="user-live-dot"></div>',
+          className: 'custom-user-dot',
+          iconSize: [16, 16]
+        });
+
+        if (!userLiveMarker) {
+          userLiveMarker = L.marker([lat, lng], { icon: liveIcon }).addTo(map).bindPopup("Aap yahan khade hain");
+          accuracyCircle = L.circle([lat, lng], { radius: accuracy, color: '#38bdf8', weight: 1, fillColor: '#38bdf8', fillOpacity: 0.15 }).addTo(map);
+          
+          // Set initial pickup automatically to user's real position
+          setPickupLocation([lat, lng], "Mera Live GPS Location");
+          map.setView([lat, lng], 14);
+        } else {
+          userLiveMarker.setLatLng([lat, lng]);
+          accuracyCircle.setLatLng([lat, lng]);
+          accuracyCircle.setRadius(accuracy);
+        }
+
+        isTrackingGps = true;
+        document.getElementById('gps-status-badge').innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping mr-1"></span> Live GPS Active';
+        document.getElementById('gps-status-badge').className = "text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-500/30 flex items-center";
+      }, (err) => {
+        console.warn("GPS Permission / Fetch Issue", err);
+        document.getElementById('gps-status-badge').innerText = "GPS Offline (Tap on Map)";
+      }, {
+        enableHighAccuracy: true,
+        maximumAge: 5000,
+        timeout: 10000
+      });
+    }
+
+    // Set & Drag Pickup Marker
+    function setPickupLocation(coords, label) {
+      pickupCoords = coords;
+      document.getElementById('input-pickup').value = label;
+
+      const pickupPin = L.divIcon({
+        html: `<div class="bg-amber-500 text-slate-950 p-2 rounded-full shadow-2xl border-2 border-white flex items-center justify-center font-bold text-xs"><i class="fa-solid fa-person-walking text-xs"></i></div>`,
+        className: 'pickup-custom-pin',
+        iconSize: [28, 28]
+      });
+
+      if (pickupMarker) {
+        pickupMarker.setLatLng(coords);
       } else {
-        dropCoords = coords;
-        document.getElementById('input-drop').value = name;
-        if (dropMarker) map.removeLayer(dropMarker);
-        dropMarker = L.marker(coords).addTo(map).bindPopup("Drop: " + name);
+        pickupMarker = L.marker(coords, { icon: pickupPin, draggable: true }).addTo(map);
+
+        // Allow Customer to Drag Pickup Pin to exact gali/corner
+        pickupMarker.on('dragend', function(event) {
+          const marker = event.target;
+          const pos = marker.getLatLng();
+          pickupCoords = [pos.lat, pos.lng];
+          document.getElementById('input-pickup').value = `Gali / Pin (${pos.lat.toFixed(4)}, ${pos.lng.toFixed(4)})`;
+          buildRoute();
+        });
       }
+
       buildRoute();
     }
 
+    // Set Drop Destination
+    function setDropLocation(coords, label) {
+      dropCoords = coords;
+      document.getElementById('input-drop').value = label;
+
+      const dropPin = L.divIcon({
+        html: `<div class="bg-rose-600 text-white p-2 rounded-full shadow-2xl border-2 border-white flex items-center justify-center font-bold text-xs"><i class="fa-solid fa-flag-checkered text-xs"></i></div>`,
+        className: 'drop-custom-pin',
+        iconSize: [28, 28]
+      });
+
+      if (dropMarker) {
+        dropMarker.setLatLng(coords);
+      } else {
+        dropMarker = L.marker(coords, { icon: dropPin, draggable: true }).addTo(map);
+
+        dropMarker.on('dragend', function(event) {
+          const pos = event.target.getLatLng();
+          dropCoords = [pos.lat, pos.lng];
+          document.getElementById('input-drop').value = `Drop Pin (${pos.lat.toFixed(4)}, ${pos.lng.toFixed(4)})`;
+          buildRoute();
+        });
+      }
+
+      buildRoute();
+    }
+
+    // Center map on user's current live location
+    window.recenterToUserGps = () => {
+      if (userLiveMarker) {
+        const pos = userLiveMarker.getLatLng();
+        setPickupLocation([pos.lat, pos.lng], "Mera Live GPS Location");
+        map.setView([pos.lat, pos.lng], 15);
+      } else {
+        startLiveGpsTracking();
+      }
+    };
+
+    // Address Search via Photon
     window.searchAddress = async (query, type) => {
       const box = document.getElementById(type === 'pickup' ? 'pickup-results' : 'drop-results');
       if (!query || query.length < 3) {
@@ -110,7 +222,8 @@
             div.className = "px-3.5 py-2 hover:bg-slate-700 cursor-pointer text-xs border-b border-gray-700 text-slate-200";
             div.innerText = name;
             div.onclick = () => {
-              setLocation(type, [lat, lng], name);
+              if (type === 'pickup') setPickupLocation([lat, lng], name);
+              else setDropLocation([lat, lng], name);
               box.classList.add('hidden');
             };
             box.appendChild(div);
@@ -119,6 +232,7 @@
       } catch (e) {}
     };
 
+    // Calculate Route Polyline
     async function buildRoute() {
       if (!pickupCoords || !dropCoords) return;
       if (routeLayer) map.removeLayer(routeLayer);
@@ -132,65 +246,49 @@
           distanceKm = Math.round(route.distance / 1000);
           routeLayer = L.geoJSON(route.geometry, { style: { color: '#f59e0b', weight: 5 } }).addTo(map);
           map.fitBounds(routeLayer.getBounds(), { padding: [30, 30] });
-          document.getElementById('route-info').innerText = `${distanceKm} km (One-Way Distance)`;
+          document.getElementById('route-info').innerText = `${distanceKm} km (One-Way Driving Route)`;
         }
       } catch (err) {
-        document.getElementById('route-info').innerText = "Route Linked";
+        document.getElementById('route-info').innerText = "Direct Line Connected";
       }
     }
 
-    // Direct WhatsApp with Mandatory Customer GPS
+    // Direct WhatsApp with Exact Dragged/GPS Coordinate Links
     window.sendToWhatsApp = () => {
       const pickup = document.getElementById('input-pickup').value.trim();
       const drop = document.getElementById('input-drop').value.trim();
 
-      if (!pickup || !drop) return alert("Pehle Pickup aur Drop location set karein!");
+      if (!pickupCoords) return alert("Kripya map par pickup point select karein ya GPS on karein!");
+      if (!dropCoords) return alert("Kripya drop location select karein!");
 
       const name = document.getElementById('c-name').value.trim() || "Customer";
       const phone = document.getElementById('c-phone').value.trim();
       const date = document.getElementById('c-date').value.trim() || "Aaj / Urgent";
 
-      if (!phone) return alert("Kripya apna mobile number likhein!");
+      if (!phone) return alert("Apna mobile number likhein!");
 
-      // Agar customer ne pehle GPS allow nahi kiya toh abhi maang lo
-      if (!customerLiveGps && navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition((pos) => {
-          customerLiveGps = {
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude
-          };
-          triggerWhatsAppMessage(name, phone, date, pickup, drop);
-        }, () => {
-          // Agar customer mana bhi kar de toh map pin wala link bhej do
-          triggerWhatsAppMessage(name, phone, date, pickup, drop);
-        });
-      } else {
-        triggerWhatsAppMessage(name, phone, date, pickup, drop);
-      }
-    };
+      const exactPickupLink = `https://maps.google.com/?q=${pickupCoords[0]},${pickupCoords[1]}`;
+      const exactDropLink = `https://maps.google.com/?q=${dropCoords[0]},${dropCoords[1]}`;
 
-    function triggerWhatsAppMessage(name, phone, date, pickup, drop) {
-      const targetCoords = customerLiveGps ? [customerLiveGps.lat, customerLiveGps.lng] : (pickupCoords || [26.8719, 75.35]);
-      const exactGoogleMapLink = `https://maps.google.com/?q=${targetCoords[0]},${targetCoords[1]}`;
-
-      const text = `🚖 *ERTIGA 7-SEATER CAB BOOKING ENQUIRY*%0A` +
-        `------------------------------------%0A` +
+      const text = `🚖 *ERTIGA 7-SEATER CAB BOOKING REQUEST*%0A` +
+        `----------------------------------------%0A` +
         `👤 *Customer Name:* ${encodeURIComponent(name)}%0A` +
-        `📞 *Customer Phone:* ${encodeURIComponent(phone)}%0A` +
+        `📞 *Contact Number:* ${encodeURIComponent(phone)}%0A` +
         `📅 *Time / Date:* ${encodeURIComponent(date)}%0A%0A` +
         `📍 *Pickup Address:* ${encodeURIComponent(pickup)}%0A` +
         `🏁 *Drop Destination:* ${encodeURIComponent(drop)}%0A` +
-        `🛣 *One-Way Distance:* ${distanceKm ? distanceKm + ' km' : 'Direct Call'}%0A` +
-        `🚘 *Vehicle Required:* Maruti Ertiga (AC 7-Seater)%0A` +
-        `------------------------------------%0A` +
-        `📌 *Customer Exact Live GPS Location:*%0A` +
-        `${exactGoogleMapLink}%0A%0A` +
-        `*Namaste Nand Lal ji, is location par gaadi ki availability aur rate confirm kijiye.*`;
+        `🛣 *Approx Route Distance:* ${distanceKm ? distanceKm + ' km' : 'Calculated on Map'}%0A` +
+        `🚘 *Vehicle:* Maruti Suzuki Ertiga (AC 7-Seater)%0A` +
+        `----------------------------------------%0A` +
+        `📌 *Customer Exact Pickup Location (Google Map):*%0A` +
+        `${exactPickupLink}%0A%0A` +
+        `🏁 *Drop Map Location:*%0A` +
+        `${exactDropLink}%0A%0A` +
+        `*Namaste Nand Lal ji, is location par Ertiga gaadi confirm kijiye.*`;
 
       window.open(`https://wa.me/${OWNER_WHATSAPP}?text=${text}`, '_blank');
-    }
+    };
 
-    // Direct Phone Call
     window.directCall = () => {
       window.location.href = `tel:${OWNER_PHONE}`;
     };
@@ -202,45 +300,58 @@
   <div class="w-full max-w-md min-h-screen flex flex-col relative bg-slate-950">
 
     <!-- Top Bar -->
-    <header class="p-4 flex items-center justify-between z-10 bg-slate-900 border-b border-slate-800">
+    <header class="p-3.5 flex items-center justify-between z-10 bg-slate-900 border-b border-slate-800">
       <div class="flex items-center gap-2.5">
-        <div class="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black">
-          <i class="fa-solid fa-van-shuttle text-base"></i>
+        <div class="w-8 h-8 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black">
+          <i class="fa-solid fa-van-shuttle text-xs"></i>
         </div>
         <div>
-          <h1 class="text-sm font-black text-white">ERTIGA CAB SERVICES</h1>
-          <p class="text-[10px] text-amber-400 font-semibold uppercase">Nand Lal Kumawat • 9413159195</p>
+          <h1 class="text-xs font-black text-white leading-tight">ERTIGA CAB DISPATCH</h1>
+          <p class="text-[9px] text-amber-400 font-semibold uppercase">Nand Lal Kumawat • Phulera</p>
         </div>
       </div>
-      <button onclick="directCall()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow">
-        <i class="fa-solid fa-phone text-xs"></i> Call Now
-      </button>
+      <div class="flex items-center gap-2">
+        <span id="gps-status-badge" class="text-[10px] font-bold text-slate-400">Locating...</span>
+        <button onclick="directCall()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 shadow">
+          <i class="fa-solid fa-phone text-[10px]"></i> Call
+        </button>
+      </div>
     </header>
 
-    <!-- Map -->
-    <div id="map"></div>
+    <!-- Map with Recenter GPS Button -->
+    <div class="relative w-full">
+      <div id="map"></div>
+      <button onclick="recenterToUserGps()" title="Locate Me" class="absolute bottom-4 right-4 z-[999] bg-white text-slate-900 p-2.5 rounded-full shadow-2xl border border-slate-300 hover:bg-slate-100 flex items-center justify-center">
+        <i class="fa-solid fa-crosshairs text-sm text-sky-600"></i>
+      </button>
+      <div class="absolute top-3 left-3 z-[999] bg-black/60 backdrop-blur px-2.5 py-1 rounded-full text-[10px] text-white/80 border border-white/10">
+        💡 <span class="text-amber-400">Tip:</span> Pin drag karke gali set karein
+      </div>
+    </div>
 
     <!-- Booking Sheet -->
     <div class="flex-1 bottom-sheet p-5 rounded-t-3xl -mt-4 z-10 flex flex-col gap-3.5">
 
       <!-- Address Inputs -->
       <div class="bg-slate-900/90 p-3.5 rounded-2xl border border-slate-800 flex flex-col gap-2.5 relative">
+        <!-- Pickup Input -->
         <div class="relative flex items-center gap-2">
-          <i class="fa-solid fa-circle-dot text-amber-400 text-xs ml-1"></i>
-          <input id="input-pickup" type="text" placeholder="Pickup Address (e.g. Phulera Station / Ghar)" 
+          <i class="fa-solid fa-person-walking text-amber-400 text-xs ml-1"></i>
+          <input id="input-pickup" type="text" placeholder="Pickup Pin / Address" 
                  oninput="searchAddress(this.value, 'pickup')"
                  class="w-full bg-transparent text-xs text-white font-semibold outline-none placeholder:text-slate-500">
-          <button onclick="useCurrentLocation()" title="Mera Live Location Use Karo" class="text-amber-400 hover:text-amber-300 p-1 flex items-center gap-1 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/30 text-[10px] font-bold">
-            <i class="fa-solid fa-crosshairs"></i> GPS
+          <button onclick="recenterToUserGps()" title="My GPS Location" class="text-sky-400 hover:text-sky-300 px-2 py-0.5 rounded-md bg-sky-500/10 border border-sky-500/20 text-[10px] font-bold">
+            <i class="fa-solid fa-location-arrow"></i> My GPS
           </button>
           <div id="pickup-results" class="autocomplete-box hidden top-9 left-0"></div>
         </div>
 
         <div class="h-[1px] bg-slate-800 ml-5 mr-1"></div>
 
+        <!-- Drop Input -->
         <div class="relative flex items-center gap-2">
-          <i class="fa-solid fa-location-dot text-rose-500 text-xs ml-1"></i>
-          <input id="input-drop" type="text" placeholder="Drop Kahan Karna Hai? (e.g. Jaipur, Ajmer, Airport)" 
+          <i class="fa-solid fa-flag-checkered text-rose-500 text-xs ml-1"></i>
+          <input id="input-drop" type="text" placeholder="Drop Destination (e.g. Jaipur, Ajmer, Airport)" 
                  oninput="searchAddress(this.value, 'drop')"
                  class="w-full bg-transparent text-xs text-white font-semibold outline-none placeholder:text-slate-500">
           <div id="drop-results" class="autocomplete-box hidden top-9 left-0"></div>
@@ -250,9 +361,9 @@
       <!-- Distance Info -->
       <div class="flex items-center justify-between px-2 text-xs">
         <span class="text-slate-400 flex items-center gap-1.5">
-          <i class="fa-solid fa-route text-amber-400"></i> Route Distance:
+          <i class="fa-solid fa-route text-amber-400"></i> Route Info:
         </span>
-        <span id="route-info" class="font-bold text-amber-400 font-mono">Location select karein</span>
+        <span id="route-info" class="font-bold text-amber-400 font-mono">Select drop point on map</span>
       </div>
 
       <!-- Vehicle Card -->
@@ -263,7 +374,7 @@
           </div>
           <div>
             <h4 class="text-xs font-bold text-white">Maruti Ertiga (AC 7-Seater)</h4>
-            <p class="text-[10px] text-slate-400">Family Cab • Outstation & Tour Specialist</p>
+            <p class="text-[10px] text-slate-400">Driver & Cab Owner: Nand Lal Kumawat</p>
           </div>
         </div>
         <span class="text-[10px] font-bold bg-amber-500 text-black px-2 py-0.5 rounded-md uppercase">7 Seats</span>
@@ -280,12 +391,12 @@
       <div class="flex flex-col gap-2 pt-1">
         <button onclick="sendToWhatsApp()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 rounded-xl text-xs uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition">
           <i class="fa-brands fa-whatsapp text-lg"></i>
-          <span>Send Route & Live GPS to WhatsApp</span>
+          <span>Send Live Pickup Pin on WhatsApp</span>
         </button>
 
         <button onclick="directCall()" class="w-full bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold py-3 rounded-xl text-xs uppercase tracking-wider border border-slate-700 flex items-center justify-center gap-2 transition">
           <i class="fa-solid fa-phone"></i>
-          <span>Direct Call: 9413159195</span>
+          <span>Call Directly: 9413159195</span>
         </button>
       </div>
 
