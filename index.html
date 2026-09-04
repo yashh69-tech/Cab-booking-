@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Phulera Express | Book Your Cab</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Leaflet Free Map (No Credit Card / No Google Bill) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; background: #0f172a; color: #f8fafc; }
+    #map { height: 260px; width: 100%; border-radius: 1.25rem; z-index: 10; }
+    .glass-card {
+      background: rgba(30, 41, 59, 0.75);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+  </style>
+
+  <!-- Firebase Script -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCp0yTjKG03ffLlq6wxwh40yxJ-PIyjUfw",
+      authDomain: "bunktracker-final.firebaseapp.com",
+      projectId: "bunktracker-final",
+      storageBucket: "bunktracker-final.firebasestorage.app",
+      messagingSenderId: "512504491604",
+      appId: "1:512504491604:web:79d685d482f40f154c47c1"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const locations = {
+      phulera: { name: "Phulera Junction", coords: [26.8719, 75.2372] },
+      jaipur_station: { name: "Jaipur Junction Railway Station", coords: [26.9196, 75.7878] },
+      jaipur_airport: { name: "Jaipur International Airport", coords: [26.8289, 75.8056] },
+      sindhi_camp: { name: "Sindhi Camp Bus Stand, Jaipur", coords: [26.9239, 75.8001] },
+      sitapura: { name: "Sitapura Industrial Area, Jaipur", coords: [26.7761, 75.8457] },
+      ajmer: { name: "Ajmer Dargah / Station", coords: [26.4499, 74.6399] }
+    };
+
+    let map, routeLayer, driverMarker;
+    let currentDistanceKm = 65;
+    let currentVehicle = "cng";
+    const rates = {
+      cng: { perKm: 7.5, name: "Sedan / CNG" },
+      petrol: { perKm: 10.0, name: "Hatchback / Petrol" },
+      diesel_suv: { perKm: 13.5, name: "Ertiga / SUV" }
+    };
+
+    function initMap() {
+      map = L.map('map', { zoomControl: false }).setView([26.8719, 75.5], 9);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(map);
+      updateRoute();
+    }
+
+    window.updateRoute = async () => {
+      const pickupKey = document.getElementById('pickup-select').value;
+      const dropKey = document.getElementById('drop-select').value;
+      const p1 = locations[pickupKey].coords;
+      const p2 = locations[dropKey].coords;
+
+      if (routeLayer) map.removeLayer(routeLayer);
+
+      L.marker(p1).addTo(map).bindPopup("Pickup: " + locations[pickupKey].name);
+      L.marker(p2).addTo(map).bindPopup("Drop: " + locations[dropKey].name);
+
+      try {
+        const url = `https://router.project-osrm.org/route/v1/driving/${p1[1]},${p1[0]};${p2[1]},${p2[0]}?overview=full&geometries=geojson`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.routes && data.routes.length > 0) {
+          const route = data.routes[0];
+          currentDistanceKm = Math.round(route.distance / 1000);
+          routeLayer = L.geoJSON(route.geometry, { style: { color: '#38bdf8', weight: 5 } }).addTo(map);
+          map.fitBounds(routeLayer.getBounds(), { padding: [25, 25] });
+        }
+      } catch (err) {
+        currentDistanceKm = 65;
+      }
+      calculateFare();
+    };
+
+    window.selectVehicle = (type) => {
+      currentVehicle = type;
+      ['cng', 'petrol', 'diesel_suv'].forEach(v => {
+        const btn = document.getElementById(`veh-${v}`);
+        btn.classList.toggle('border-cyan-400', v === type);
+        btn.classList.toggle('bg-cyan-500/10', v === type);
+      });
+      calculateFare();
+    };
+
+    function calculateFare() {
+      const fuelCost = Math.round(currentDistanceKm * rates[currentVehicle].perKm);
+      const driverFee = 350;
+      const tollEstimate = currentDistanceKm > 40 ? 95 : 0;
+      const total = fuelCost + driverFee + tollEstimate;
+
+      document.getElementById('display-dist').innerText = `${currentDistanceKm} km`;
+      document.getElementById('display-fuel').innerText = `₹${fuelCost}`;
+      document.getElementById('display-driver').innerText = `₹${driverFee}`;
+      document.getElementById('display-toll').innerText = `₹${tollEstimate}`;
+      document.getElementById('display-total').innerText = `₹${total}`;
+
+      document.getElementById('ai-route-text').innerText = `AI Estimate: ${currentDistanceKm} km via NH48 highway. Driving duration ~${Math.round(currentDistanceKm * 1.4)} mins. Fuel calculated at ₹${rates[currentVehicle].perKm}/km.`;
+    }
+
+    window.requestBooking = async () => {
+      const clientName = document.getElementById('c-name').value.trim();
+      const clientPhone = document.getElementById('c-phone').value.trim();
+
+      if (!clientName || !clientPhone) return alert("Please enter traveler name and phone number!");
+
+      const pickup = locations[document.getElementById('pickup-select').value].name;
+      const drop = locations[document.getElementById('drop-select').value].name;
+      const fare = document.getElementById('display-total').innerText;
+
+      await setDoc(doc(db, "active_rides", "live_trip"), {
+        tripId: "TRIP-" + Date.now().toString().slice(-4),
+        clientName,
+        clientPhone,
+        pickup,
+        drop,
+        distance: currentDistanceKm,
+        vehicle: rates[currentVehicle].name,
+        fare,
+        status: "Requested",
+        driverLat: null,
+        driverLng: null,
+        timestamp: new Date().toLocaleTimeString()
+      });
+
+      alert("Ride Request Dispatched to Driver!\nPlease wait while driver confirms your ride.");
+      listenForDriver();
+    };
+
+    function listenForDriver() {
+      onSnapshot(doc(db, "active_rides", "live_trip"), (snap) => {
+        if (!snap.exists()) return;
+        const d = snap.data();
+
+        const badge = document.getElementById('ride-status-badge');
+        badge.innerText = d.status;
+        badge.classList.remove('hidden');
+
+        if (d.driverLat && d.driverLng) {
+          if (!driverMarker) {
+            const carIcon = L.divIcon({
+              html: `<div class="bg-amber-500 text-slate-900 rounded-full p-2 shadow-xl border-2 border-white flex items-center justify-center"><i class="fa-solid fa-car text-xs"></i></div>`,
+              className: 'custom-car-pin',
+              iconSize: [28, 28]
+            });
+            driverMarker = L.marker([d.driverLat, d.driverLng], { icon: carIcon }).addTo(map);
+          } else {
+            driverMarker.setLatLng([d.driverLat, d.driverLng]);
+          }
+        }
+      });
+    }
+
+    window.onload = () => {
+      initMap();
+      listenForDriver();
+    };
+  </script>
+</head>
+<body class="p-4 flex flex-col items-center min-h-screen">
+  <div class="w-full max-w-md flex flex-col gap-4">
+
+    <!-- Header -->
+    <header class="glass-card px-5 py-3 rounded-2xl flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-xl bg-amber-500 text-slate-900 flex items-center justify-center font-black">
+          <i class="fa-solid fa-taxi text-sm"></i>
+        </div>
+        <div>
+          <h1 class="text-sm font-black tracking-wide text-white leading-tight">PHULERA EXPRESS</h1>
+          <p class="text-[9px] text-cyan-400 font-bold tracking-widest uppercase">Smart Cab Booking</p>
+        </div>
+      </div>
+      <span class="text-[10px] text-emerald-400 font-mono font-bold bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-500/30">
+        ● Online
+      </span>
+    </header>
+
+    <!-- Map Viewport -->
+    <div class="relative">
+      <div id="map"></div>
+      <div id="ride-status-badge" class="hidden absolute top-3 left-3 z-[1000] bg-emerald-600 px-3 py-1 rounded-full text-[11px] font-bold text-white shadow-lg">
+        Finding Driver...
+      </div>
+    </div>
+
+    <!-- Pickup & Drop Input -->
+    <div class="glass-card p-4 rounded-2xl flex flex-col gap-2.5">
+      <div>
+        <label class="text-[10px] uppercase font-bold text-cyan-400 block mb-1">Pickup Point</label>
+        <select id="pickup-select" onchange="updateRoute()" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-white">
+          <option value="phulera" selected>Phulera Junction (Railway Station / Town)</option>
+          <option value="jaipur_station">Jaipur Junction Station</option>
+          <option value="sindhi_camp">Sindhi Camp, Jaipur</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="text-[10px] uppercase font-bold text-rose-400 block mb-1">Drop Destination</label>
+        <select id="drop-select" onchange="updateRoute()" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-white">
+          <option value="sindhi_camp" selected>Sindhi Camp Bus Stand, Jaipur</option>
+          <option value="jaipur_station">Jaipur Junction Railway Station</option>
+          <option value="jaipur_airport">Jaipur International Airport</option>
+          <option value="sitapura">Sitapura Industrial Area, Jaipur</option>
+          <option value="ajmer">Ajmer Dargah / Station</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Vehicle Types -->
+    <div class="grid grid-cols-3 gap-2">
+      <button id="veh-cng" onclick="selectVehicle('cng')" class="glass-card p-2.5 rounded-xl border border-cyan-400 bg-cyan-500/10 text-center flex flex-col items-center">
+        <i class="fa-solid fa-car-side text-sm mb-1 text-cyan-400"></i>
+        <span class="text-[11px] font-bold">Sedan / CNG</span>
+        <span class="text-[9px] opacity-60">₹7.5 / km</span>
+      </button>
+      <button id="veh-petrol" onclick="selectVehicle('petrol')" class="glass-card p-2.5 rounded-xl border border-transparent text-center flex flex-col items-center">
+        <i class="fa-solid fa-car text-sm mb-1 text-slate-400"></i>
+        <span class="text-[11px] font-bold">Hatchback</span>
+        <span class="text-[9px] opacity-60">₹10 / km</span>
+      </button>
+      <button id="veh-diesel_suv" onclick="selectVehicle('diesel_suv')" class="glass-card p-2.5 rounded-xl border border-transparent text-center flex flex-col items-center">
+        <i class="fa-solid fa-van-shuttle text-sm mb-1 text-slate-400"></i>
+        <span class="text-[11px] font-bold">SUV (Ertiga)</span>
+        <span class="text-[9px] opacity-60">₹13.5 / km</span>
+      </button>
+    </div>
+
+    <!-- Fare Breakdown -->
+    <div class="glass-card p-4 rounded-2xl flex flex-col gap-2 text-xs">
+      <div class="flex justify-between items-center pb-2 border-b border-white/10">
+        <span class="opacity-75">Highway Route Distance</span>
+        <span id="display-dist" class="font-mono font-bold text-cyan-300">65 km</span>
+      </div>
+      <div class="flex justify-between items-center opacity-75">
+        <span>Fuel Cost (Meter Rate)</span>
+        <span id="display-fuel" class="font-mono font-semibold">₹488</span>
+      </div>
+      <div class="flex justify-between items-center opacity-75">
+        <span>Driver Allowance (Bhatta)</span>
+        <span id="display-driver" class="font-mono font-semibold">₹350</span>
+      </div>
+      <div class="flex justify-between items-center opacity-75">
+        <span>Toll / Express Tax</span>
+        <span id="display-toll" class="font-mono font-semibold">₹95</span>
+      </div>
+      <div class="flex justify-between items-center text-sm font-black pt-2 border-t border-white/10 text-white">
+        <span>Net Estimated Fare</span>
+        <span id="display-total" class="font-mono text-xl text-emerald-400">₹933</span>
+      </div>
+    </div>
+
+    <!-- AI Route Advisor -->
+    <div class="p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-[11px] text-cyan-200 flex gap-2">
+      <i class="fa-solid fa-microchip text-cyan-400 mt-0.5"></i>
+      <p id="ai-route-text">Calculating optimal route and toll advisory...</p>
+    </div>
+
+    <!-- Traveler Details & Booking Button -->
+    <div class="glass-card p-4 rounded-2xl flex flex-col gap-2.5">
+      <input id="c-name" type="text" placeholder="Traveler Full Name" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+      <input id="c-phone" type="tel" placeholder="Contact Mobile Number" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+      <button onclick="requestBooking()" class="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 text-white font-black py-3 rounded-xl text-xs uppercase tracking-wider shadow-xl">
+        Confirm & Book Cab Now
+      </button>
+    </div>
+
+    <footer class="text-center text-[11px] opacity-40 py-2">
+      Phulera Cab Dispatch • Engineered by Yashh
+    </footer>
+
+  </div>
+</body>
+</html>
